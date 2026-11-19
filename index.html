@@ -6,7 +6,7 @@
   <title>Anime Info</title>
   <meta name="description" content="Browse anime and manga from AniList, with each anime matched to its manga.">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <header class="container">
@@ -15,7 +15,7 @@
         <li><a href="#/" class="brand"><strong>Anime Info</strong></a></li>
         <li><a href="#/anime" data-nav="anime">Anime</a></li>
         <li><a href="#/manga" data-nav="manga">Manga</a></li>
-        <li><a href="#/charts" data-nav="charts">Charts</a></li>
+        <li><a href="#/ost" data-nav="ost">OST</a></li>
       </ul>
       <ul class="search-wrap">
         <li>
@@ -23,6 +23,7 @@
             <select id="search-type" aria-label="Search in">
               <option value="anime">Anime</option>
               <option value="manga">Manga</option>
+              <option value="ost">OST</option>
             </select>
             <input id="search-input" type="search" name="q" placeholder="Search…" aria-label="Search" required>
             <input type="submit" value="Search">
@@ -43,6 +44,6 @@
     </small>
   </footer>
 
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
 </body>
 </html>
