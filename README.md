@@ -7,9 +7,11 @@ A small static site for browsing anime and manga. It runs entirely in the browse
 - **Search:** find any anime or manga by title
 - **Detail:** score, rank, popularity, format, episodes or chapters and volumes, status, dates, studios or authors, genres and tags, synopsis, and a link to AniList
 - **Matching:** each anime page lists its source manga, and each manga page lists its anime adaptations, using AniList's own relation data. Related titles (sequels, prequels, spin-offs) are listed below.
+- **Theme songs:** anime pages list every opening and ending from [AnimeThemes](https://animethemes.moe) (looked up by AniList ID), with the artist, episode range, a ▶ Play button for the TV-size audio, a link to watch the clip, and an Apple Music search link. Long lists show 12 songs with the rest behind "Show more".
+- **Charts tab:** the top 50 songs in the iTunes Store's "Anime" genre, with a country picker (Japan, US, Singapore, Malaysia, Taiwan, Hong Kong, Philippines, Indonesia, Thailand, UK; the choice is remembered), 30-second previews and Apple Music links. This ranks store sales, not streaming.
 - **MangaDex:** manga pages have a "Find on MangaDex" button that opens a MangaDex search for the title. MangaDex's API doesn't allow calls from other websites without a proxy server, so the site links to it instead of loading its data.
 
-Data comes from the [AniList GraphQL API](https://docs.anilist.co). It needs no API key and allows browser requests from any website. The rate limit is currently 30 requests per minute, which is plenty for a few users. If the API is down or the limit is hit, the site shows an error with a "Try again" button. This project is not affiliated with or endorsed by AniList.
+Anime and manga data comes from the [AniList GraphQL API](https://docs.anilist.co). Theme songs come from the [AnimeThemes GraphQL API](https://api-docs.animethemes.moe), and charts from the iTunes Store RSS feed. All three allow browser requests from any website and need no key. AniList currently allows 30 requests per minute, which is plenty for a few users. If AniList or the chart is down, or the limit is hit, the site shows an error with a "Try again" button. If AnimeThemes is down, only the theme songs section shows a short "unavailable" note. This project is not affiliated with or endorsed by AniList, AnimeThemes or Apple.
 
 ## Stack
 

@@ -3,9 +3,43 @@
 //   #/ or #/anime                -> this season's anime
 //   #/manga                      -> trending manga
 //   #/search/<anime|manga>/<q>   -> search results
-//   #/anime/<id>, #/manga/<id>   -> detail page (AniList ID), with matched anime/manga
+//   #/anime/<id>, #/manga/<id>   -> detail page (AniList ID), with matched anime/manga;
+//                                   anime pages also load theme songs from AnimeThemes
+//   #/charts/<country>           -> top anime songs from the iTunes Store chart
 
 const API = "https://graphql.anilist.co";
+const THEMES_API = "https://graphql.animethemes.moe/";
+const CHART_COUNTRIES = { jp: "Japan", us: "United States", sg: "Singapore", my: "Malaysia", tw: "Taiwan", hk: "Hong Kong", ph: "Philippines", id: "Indonesia", th: "Thailand", gb: "United Kingdom" };
+
+// One shared audio player for theme songs and chart previews.
+const player = new Audio();
+let playingButton = null;
+
+function stopPlayer() {
+  player.pause();
+  if (playingButton) playingButton.textContent = "▶ Play";
+  playingButton = null;
+}
+
+player.addEventListener("ended", stopPlayer);
+
+// Any element with data-audio="<url>" becomes a play/pause button.
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-audio]");
+  if (!btn) return;
+  if (playingButton === btn) {
+    stopPlayer();
+    return;
+  }
+  stopPlayer();
+  player.src = btn.dataset.audio;
+  player.play().catch(() => {
+    btn.textContent = "Can't play";
+    playingButton = null;
+  });
+  btn.textContent = "⏸ Pause";
+  playingButton = btn;
+});
 const app = document.getElementById("app");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
@@ -83,7 +117,7 @@ function setActiveNav(type) {
     if (a.dataset.nav === type) a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
   });
-  searchType.value = type;
+  if (type === "anime" || type === "manga") searchType.value = type;
 }
 
 // ---------- GraphQL ----------
@@ -198,6 +232,166 @@ async function searchView(token, type, text) {
   app.innerHTML = `<h2>${type === "anime" ? "Anime" : "Manga"} results for “${esc(text)}”</h2>${cardsHTML(data.Page.media)}`;
 }
 
+// ---------- theme songs (AnimeThemes) ----------
+
+const THEMES_QUERY = `
+  query ($id: [Int!]) {
+    findAnimeByExternalSite(site: ANILIST, id: $id) {
+      animethemes {
+        type
+        sequence
+        song { title { romaji native } performances { as artist { name { main } } } }
+        animethemeentries { episodes nsfw videos { nodes { link audio { link } } } }
+      }
+    }
+  }`;
+
+async function fetchThemes(anilistId) {
+  const res = await fetch(THEMES_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query: THEMES_QUERY, variables: { id: [anilistId] } }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const json = await res.json();
+  if (!res.ok || !json.data) throw new Error("AnimeThemes unavailable");
+  return json.data.findAnimeByExternalSite?.[0]?.animethemes || [];
+}
+
+function themeRowHTML(t) {
+  const title = t.song?.title?.romaji || t.song?.title?.native || "Untitled";
+  const native = t.song?.title?.native && t.song.title.native !== title ? t.song.title.native : "";
+  const artists = (t.song?.performances || [])
+    .map((p) => p.artist?.name?.main + (p.as ? ` (as ${p.as})` : ""))
+    .filter(Boolean)
+    .join(", ");
+  const entry = (t.animethemeentries || []).find((e) => !e.nsfw) || t.animethemeentries?.[0];
+  const video = entry?.videos?.nodes?.[0];
+  const label = `${t.type}${t.sequence ? t.sequence : ""}`;
+  const appleSearch = `https://music.apple.com/search?term=${encodeURIComponent(`${title} ${artists}`)}`;
+  return `
+    <li class="song">
+      <span class="song-badge">${esc(label)}</span>
+      <div class="song-info">
+        <div class="song-title">${esc(title)}${native ? ` <span class="muted">${esc(native)}</span>` : ""}</div>
+        <div class="song-meta">${esc([artists, entry?.episodes ? `eps ${entry.episodes}` : ""].filter(Boolean).join(" · "))}</div>
+      </div>
+      <div class="song-actions">
+        ${video?.audio?.link ? `<button class="outline small" data-audio="${esc(video.audio.link)}">▶ Play</button>` : ""}
+        ${video?.link && !entry?.nsfw ? `<a class="small" href="${esc(video.link)}" target="_blank" rel="noopener">Watch</a>` : ""}
+        <a class="small" href="${esc(appleSearch)}" target="_blank" rel="noopener">Apple Music</a>
+      </div>
+    </li>`;
+}
+
+async function loadThemes(token, anilistId) {
+  const box = document.getElementById("themes");
+  if (!box) return;
+  box.innerHTML = `<h3>Theme songs</h3><p class="muted" aria-busy="true">Loading theme songs…</p>`;
+  let themes;
+  try {
+    themes = await fetchThemes(anilistId);
+  } catch {
+    if (token === currentRoute) box.innerHTML = `<h3>Theme songs</h3><p class="muted">Theme songs are unavailable right now.</p>`;
+    return;
+  }
+  if (token !== currentRoute) return;
+  if (!themes.length) {
+    box.innerHTML = `<h3>Theme songs</h3><p class="muted">No theme songs listed for this anime.</p>`;
+    return;
+  }
+  // AnimeThemes can list the same song more than once (e.g. dub versions). Keep the entry with artists.
+  const unique = new Map();
+  for (const t of themes) {
+    const key = `${t.type}${t.sequence || 0}|${(t.song?.title?.romaji || t.song?.title?.native || "").toLowerCase()}`;
+    const prev = unique.get(key);
+    if (!prev || (!prev.song?.performances?.length && t.song?.performances?.length)) unique.set(key, t);
+  }
+  const order = { OP: 0, ED: 1 };
+  const list = [...unique.values()].sort(
+    (a, b) => (order[a.type] ?? 2) - (order[b.type] ?? 2) || (a.sequence || 0) - (b.sequence || 0)
+  );
+  const SHOWN = 12;
+  const first = list.slice(0, SHOWN).map(themeRowHTML).join("");
+  const rest = list.slice(SHOWN).map(themeRowHTML).join("");
+  box.innerHTML = `<h3>Theme songs <small class="muted">(${list.length})</small></h3>
+    <ul class="songs">${first}</ul>
+    ${rest ? `<details><summary>Show ${list.length - SHOWN} more</summary><ul class="songs">${rest}</ul></details>` : ""}
+    <p class="muted small-print">Songs and clips from <a href="https://animethemes.moe" target="_blank" rel="noopener">AnimeThemes</a>.</p>`;
+}
+
+// ---------- charts (iTunes Store "Anime" genre) ----------
+
+function chartCountry() {
+  try {
+    const saved = localStorage.getItem("chartCountry");
+    if (saved && CHART_COUNTRIES[saved]) return saved;
+  } catch {}
+  return "jp";
+}
+
+async function chartsView(token, country) {
+  setActiveNav("charts");
+  searchInput.value = "";
+  if (!CHART_COUNTRIES[country]) country = chartCountry();
+  try {
+    localStorage.setItem("chartCountry", country);
+  } catch {}
+
+  const picker = `
+    <div class="chart-head">
+      <h2>Top anime songs</h2>
+      <select id="chart-country" aria-label="Country">
+        ${Object.entries(CHART_COUNTRIES).map(([code, name]) => `<option value="${code}" ${code === country ? "selected" : ""}>${esc(name)}</option>`).join("")}
+      </select>
+    </div>`;
+  app.innerHTML = `${picker}<div class="center"><span aria-busy="true">Loading chart…</span></div>`;
+  document.getElementById("chart-country").addEventListener("change", (e) => {
+    location.hash = `#/charts/${e.target.value}`;
+  });
+
+  let res;
+  try {
+    res = await fetch(`https://itunes.apple.com/${country}/rss/topsongs/limit=50/genre=29/json`, { signal: AbortSignal.timeout(15000) });
+  } catch {
+    throw new Error("The chart is unavailable right now. Try again later.");
+  }
+  if (!res.ok) throw new Error(`The chart is unavailable right now (error ${res.status}).`);
+  const feed = (await res.json()).feed;
+  if (token !== currentRoute) return;
+
+  let entries = feed.entry || [];
+  if (!Array.isArray(entries)) entries = [entries];
+  const rows = entries.map((e, i) => {
+    const links = Array.isArray(e.link) ? e.link : [e.link];
+    const page = links.find((l) => l.attributes?.rel === "alternate")?.attributes?.href;
+    const preview = links.find((l) => l.attributes?.rel === "enclosure")?.attributes?.href;
+    const images = e["im:image"] || [];
+    const art = images[images.length - 1]?.label;
+    const album = e["im:collection"]?.["im:name"]?.label;
+    return `
+      <li class="song chart-row">
+        <span class="chart-rank">${i + 1}</span>
+        ${art ? `<img class="chart-art" src="${esc(art)}" alt="" loading="lazy">` : ""}
+        <div class="song-info">
+          <div class="song-title">${esc(e["im:name"]?.label)}</div>
+          <div class="song-meta">${esc([e["im:artist"]?.label, album].filter(Boolean).join(" · "))}</div>
+        </div>
+        <div class="song-actions">
+          ${preview ? `<button class="outline small" data-audio="${esc(preview)}">▶ Play</button>` : ""}
+          ${page ? `<a class="small" href="${esc(page)}" target="_blank" rel="noopener">Apple Music</a>` : ""}
+        </div>
+      </li>`;
+  });
+
+  app.innerHTML = `${picker}
+    <p class="muted">Best-selling songs in the iTunes Store's Anime genre in ${esc(CHART_COUNTRIES[country])}, updated by Apple. Previews are 30 seconds.</p>
+    ${rows.length ? `<ol class="songs chart">${rows.join("")}</ol>` : `<p class="center">No chart data for this country.</p>`}`;
+  document.getElementById("chart-country").addEventListener("change", (e) => {
+    location.hash = `#/charts/${e.target.value}`;
+  });
+}
+
 // Relation types that link an anime to its manga (and back) come first.
 const RELATION_ORDER = ["SOURCE", "ADAPTATION", "PREQUEL", "SEQUEL", "PARENT", "SIDE_STORY", "SPIN_OFF", "ALTERNATIVE", "ALTERNATIVE_VERSION", "SUMMARY", "COMPILATION", "OTHER"];
 
@@ -299,9 +493,11 @@ async function detailView(token, type, id) {
           <a href="${esc(m.siteUrl)}" target="_blank" rel="noopener" role="button" class="outline">View on AniList</a>
           ${isAnime ? "" : `<a href="${esc(mangadexUrl)}" target="_blank" rel="noopener" role="button" class="outline secondary">Find on MangaDex</a>`}
         </div>
+        ${isAnime ? `<section id="themes" class="themes"></section>` : ""}
       </div>
     </section>
     ${relationsHTML(m)}`;
+  if (isAnime) loadThemes(token, m.id);
 }
 
 // ---------- router ----------
@@ -312,9 +508,12 @@ async function route() {
   const [section] = parts;
   document.title = "Anime Info";
   window.scrollTo(0, 0);
+  stopPlayer();
 
   try {
-    if ((section === "anime" || section === "manga") && parts[1]) {
+    if (section === "charts") {
+      await chartsView(token, parts[1] || chartCountry());
+    } else if ((section === "anime" || section === "manga") && parts[1]) {
       await detailView(token, section, decodeURIComponent(parts[1]));
     } else if (section === "search") {
       // #/search/<type>/<q>; older links used #/search/<q> for anime
