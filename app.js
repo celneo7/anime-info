@@ -1,10 +1,10 @@
-// Anime Info — a static site that reads from the Jikan API (unofficial MyAnimeList API).
+// Anime Info — a static site that reads from the AniList GraphQL API.
 // Routes (URL hash):
 //   #/                 -> this season's anime
 //   #/search/<query>   -> search results
-//   #/anime/<id>       -> anime detail
+//   #/anime/<id>       -> anime detail (AniList ID)
 
-const API = "https://api.jikan.moe/v4";
+const API = "https://graphql.anilist.co";
 const app = document.getElementById("app");
 const searchForm = document.getElementById("search-form");
 const searchInput = document.getElementById("search-input");
@@ -22,31 +22,106 @@ function esc(value) {
     .replaceAll("'", "&#39;");
 }
 
-async function getJSON(path) {
+async function query(gql, variables = {}) {
   let res;
   try {
-    res = await fetch(API + path, { signal: AbortSignal.timeout(15000) });
+    res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ query: gql, variables }),
+      signal: AbortSignal.timeout(15000),
+    });
   } catch {
-    throw new Error("MyAnimeList data is unavailable right now. Try again later.");
+    throw new Error("Anime data is unavailable right now. Try again later.");
   }
-  if (res.status === 429) throw new Error("Too many requests to MyAnimeList data. Wait a moment and try again.");
-  if (res.status === 404) throw new Error("That anime couldn't be found.");
-  if (!res.ok) throw new Error(`MyAnimeList data is unavailable right now (error ${res.status}).`);
-  return res.json();
+  if (res.status === 429) throw new Error("Too many requests. Wait a minute and try again.");
+  const json = await res.json().catch(() => null);
+  if (res.status === 404 || json?.errors?.some((e) => e.status === 404)) throw new Error("That anime couldn't be found.");
+  if (!res.ok || !json?.data) throw new Error(`Anime data is unavailable right now (error ${res.status}).`);
+  return json.data;
 }
 
-function uniqueById(list) {
-  const seen = new Set();
-  return list.filter((a) => (seen.has(a.mal_id) ? false : seen.add(a.mal_id)));
+function currentSeason(date = new Date()) {
+  const seasons = ["WINTER", "WINTER", "WINTER", "SPRING", "SPRING", "SPRING", "SUMMER", "SUMMER", "SUMMER", "FALL", "FALL", "FALL"];
+  return { season: seasons[date.getMonth()], year: date.getFullYear() };
 }
 
-function poster(anime) {
-  return anime.images?.webp?.large_image_url || anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url || "";
+function pretty(enumValue) {
+  if (!enumValue) return "";
+  const special = { TV: "TV", TV_SHORT: "TV Short", OVA: "OVA", ONA: "ONA" };
+  if (special[enumValue]) return special[enumValue];
+  return enumValue.toLowerCase().replaceAll("_", " ").replace(/^\w/, (c) => c.toUpperCase());
 }
 
-function displayTitle(anime) {
-  return anime.title_english || anime.title;
+function formatDate(d) {
+  if (!d?.year) return "";
+  if (!d.month) return String(d.year);
+  return new Date(d.year, d.month - 1, d.day || 1).toLocaleDateString("en", {
+    year: "numeric",
+    month: "short",
+    ...(d.day ? { day: "numeric" } : {}),
+  });
 }
+
+function cleanDescription(text) {
+  return (text || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function displayTitle(a) {
+  return a.title.english || a.title.romaji;
+}
+
+// ---------- GraphQL ----------
+
+const CARD_FIELDS = `
+  id
+  title { romaji english }
+  coverImage { large }
+  format
+  averageScore
+  seasonYear
+`;
+
+const SEASON_QUERY = `
+  query ($season: MediaSeason, $year: Int) {
+    Page(perPage: 24) {
+      media(season: $season, seasonYear: $year, type: ANIME, isAdult: false, sort: POPULARITY_DESC) { ${CARD_FIELDS} }
+    }
+  }`;
+
+const SEARCH_QUERY = `
+  query ($search: String) {
+    Page(perPage: 24) {
+      media(search: $search, type: ANIME, isAdult: false, sort: SEARCH_MATCH) { ${CARD_FIELDS} }
+    }
+  }`;
+
+const DETAIL_QUERY = `
+  query ($id: Int) {
+    Media(id: $id, type: ANIME) {
+      id
+      siteUrl
+      title { romaji english native }
+      coverImage { extraLarge large }
+      format
+      episodes
+      duration
+      status
+      startDate { year month day }
+      endDate { year month day }
+      averageScore
+      popularity
+      rankings { rank type allTime }
+      studios(isMain: true) { nodes { name } }
+      genres
+      tags { name rank isMediaSpoiler }
+      description(asHtml: false)
+    }
+  }`;
 
 // ---------- views ----------
 
@@ -67,11 +142,13 @@ function cardsHTML(list) {
   if (!list.length) return `<p class="center">No anime found.</p>`;
   return `<div class="grid-cards">${list
     .map((a) => {
-      const meta = [a.type, a.score ? `★ ${a.score}` : null, a.year].filter(Boolean).join(" · ");
+      const meta = [pretty(a.format), a.averageScore ? `★ ${a.averageScore}%` : null, a.seasonYear]
+        .filter(Boolean)
+        .join(" · ");
       return `
-        <a class="card-link" href="#/anime/${a.mal_id}">
+        <a class="card-link" href="#/anime/${a.id}">
           <article class="card">
-            <img src="${esc(poster(a))}" alt="" loading="lazy">
+            <img src="${esc(a.coverImage?.large)}" alt="" loading="lazy">
             <div class="card-body">
               <div class="card-title">${esc(displayTitle(a))}</div>
               <div class="card-meta">${esc(meta)}</div>
@@ -83,65 +160,68 @@ function cardsHTML(list) {
 }
 
 async function seasonView(token) {
+  const { season, year } = currentSeason();
   showLoading("Loading this season's anime…");
-  const { data } = await getJSON("/seasons/now?sfw=true&limit=24");
+  const data = await query(SEASON_QUERY, { season, year });
   if (token !== currentRoute) return;
-  const list = uniqueById(data);
-  const label = list[0]?.season && list[0]?.year
-    ? `${list[0].season[0].toUpperCase()}${list[0].season.slice(1)} ${list[0].year}`
-    : "This season";
-  app.innerHTML = `<h2>${esc(label)} anime</h2>${cardsHTML(list)}`;
+  app.innerHTML = `<h2>${esc(pretty(season))} ${year} anime</h2>${cardsHTML(data.Page.media)}`;
 }
 
-async function searchView(token, query) {
-  searchInput.value = query;
-  showLoading(`Searching for “${query}”…`);
-  const { data } = await getJSON(`/anime?sfw=true&limit=24&order_by=members&sort=desc&q=${encodeURIComponent(query)}`);
+async function searchView(token, text) {
+  searchInput.value = text;
+  showLoading(`Searching for “${text}”…`);
+  const data = await query(SEARCH_QUERY, { search: text });
   if (token !== currentRoute) return;
-  app.innerHTML = `<h2>Results for “${esc(query)}”</h2>${cardsHTML(uniqueById(data))}`;
-}
-
-function themeList(title, items) {
-  if (!items?.length) return "";
-  return `<h4>${title}</h4><ol>${items.map((t) => `<li>${esc(t.replace(/^\d+:\s*/, ""))}</li>`).join("")}</ol>`;
+  app.innerHTML = `<h2>Results for “${esc(text)}”</h2>${cardsHTML(data.Page.media)}`;
 }
 
 async function detailView(token, id) {
+  const numericId = Number(id);
+  if (!Number.isInteger(numericId) || numericId <= 0) throw new Error("That anime couldn't be found.");
   showLoading();
-  const { data: a } = await getJSON(`/anime/${encodeURIComponent(id)}/full`);
+  const { Media: a } = await query(DETAIL_QUERY, { id: numericId });
   if (token !== currentRoute) return;
 
-  const altTitles = [a.title_english && a.title !== a.title_english ? a.title : null, a.title_japanese]
+  const altTitles = [a.title.english && a.title.romaji !== a.title.english ? a.title.romaji : null, a.title.native]
     .filter(Boolean)
     .join(" · ");
 
+  const rated = a.rankings?.find((r) => r.type === "RATED" && r.allTime);
+  const start = formatDate(a.startDate);
+  const end = formatDate(a.endDate);
+  const aired = start && end && start !== end ? `${start} to ${end}` : start;
+
   const facts = [
-    ["Score", a.score ? `★ ${a.score}${a.scored_by ? ` (${a.scored_by.toLocaleString()} votes)` : ""}` : "N/A"],
-    ["Rank", a.rank ? `#${a.rank}` : "N/A"],
-    ["Type", a.type],
-    ["Episodes", a.episodes ?? "Unknown"],
-    ["Status", a.status],
-    ["Aired", a.aired?.string],
-    ["Studios", a.studios?.map((s) => s.name).join(", ")],
+    ["Score", a.averageScore ? `★ ${a.averageScore}%` : "N/A"],
+    ["Rank", rated ? `#${rated.rank} highest rated` : null],
+    ["Popularity", a.popularity ? `${a.popularity.toLocaleString()} users` : null],
+    ["Format", pretty(a.format)],
+    ["Episodes", a.episodes ? `${a.episodes}${a.duration ? ` × ${a.duration} min` : ""}` : "Unknown"],
+    ["Status", pretty(a.status)],
+    ["Aired", aired],
+    ["Studios", a.studios?.nodes?.map((s) => s.name).join(", ")],
   ].filter(([, v]) => v);
 
-  const tags = [...(a.genres || []), ...(a.themes || []), ...(a.demographics || [])];
-  const themesHTML = themeList("Openings", a.theme?.openings) + themeList("Endings", a.theme?.endings);
+  const topTags = (a.tags || [])
+    .filter((t) => !t.isMediaSpoiler && t.rank >= 60)
+    .slice(0, 5)
+    .map((t) => t.name);
+  const tags = [...(a.genres || []), ...topTags];
+  const cover = a.coverImage?.extraLarge || a.coverImage?.large;
 
   document.title = `${displayTitle(a)} · Anime Info`;
   app.innerHTML = `
     <p><a href="javascript:history.back()">← Back</a></p>
     <section class="detail">
-      <img src="${esc(poster(a))}" alt="Poster for ${esc(displayTitle(a))}">
+      <img src="${esc(cover)}" alt="Cover for ${esc(displayTitle(a))}">
       <div>
         <h2>${esc(displayTitle(a))}</h2>
         ${altTitles ? `<p class="alt-titles">${esc(altTitles)}</p>` : ""}
         <dl class="facts">${facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
-        ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">${esc(t.name)}</span>`).join("")}</div>` : ""}
+        ${tags.length ? `<div class="tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join("")}</div>` : ""}
         <h3>Synopsis</h3>
-        <p class="synopsis">${esc(a.synopsis || "No synopsis available.")}</p>
-        ${themesHTML ? `<section class="themes"><h3>Theme songs</h3>${themesHTML}</section>` : ""}
-        <p><a href="${esc(a.url)}" target="_blank" rel="noopener" role="button" class="outline">View on MyAnimeList</a></p>
+        <p class="synopsis">${esc(cleanDescription(a.description) || "No synopsis available.")}</p>
+        <p><a href="${esc(a.siteUrl)}" target="_blank" rel="noopener" role="button" class="outline">View on AniList</a></p>
       </div>
     </section>`;
 }
@@ -165,10 +245,7 @@ async function route() {
     }
   } catch (err) {
     if (token !== currentRoute) return;
-    const message = err instanceof TypeError
-      ? "MyAnimeList data is unavailable right now. Try again later."
-      : err.message;
-    showError(message);
+    showError(err.message || "Anime data is unavailable right now. Try again later.");
   }
 }
 

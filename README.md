@@ -2,11 +2,11 @@
 
 A small static site for browsing anime information. It runs entirely in the browser and is hosted on GitHub Pages.
 
-- **Home:** this season's anime
+- **Home:** this season's most popular anime
 - **Search:** find any anime by title
-- **Detail:** score, rank, episodes, status, air dates, studios, genres, synopsis, opening/ending theme songs, and a link to MyAnimeList
+- **Detail:** score, rank, popularity, format, episodes, status, air dates, studios, genres and tags, synopsis, and a link to AniList
 
-Data comes from [Jikan](https://jikan.moe), an **unofficial** MyAnimeList API. Jikan allows about 3 requests per second and 60 per minute, and it is sometimes slow or down. When that happens the site shows an error with a "Try again" button. This project is not affiliated with or endorsed by MyAnimeList.
+Data comes from the [AniList GraphQL API](https://docs.anilist.co). It needs no API key and allows browser requests from any website. The rate limit is currently 30 requests per minute, which is plenty for a few users. If the API is down or the limit is hit, the site shows an error with a "Try again" button. This project is not affiliated with or endorsed by AniList.
 
 ## Stack
 
