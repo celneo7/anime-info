@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anime Info</title>
+  <meta name="description" content="Browse anime information from MyAnimeList (via Jikan).">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul><li><a href="#/" class="brand"><strong>Anime Info</strong></a></li></ul>
+      <ul class="search-wrap">
+        <li>
+          <form id="search-form" role="search">
+            <input id="search-input" type="search" name="q" placeholder="Search anime…" aria-label="Search anime" required>
+            <input type="submit" value="Search">
+          </form>
+        </li>
+      </ul>
+    </nav>
+  </header>
+
+  <main class="container" id="app" aria-live="polite"></main>
+
+  <footer class="container">
+    <small>
+      Data from <a href="https://myanimelist.net" target="_blank" rel="noopener">MyAnimeList</a>
+      via <a href="https://jikan.moe" target="_blank" rel="noopener">Jikan</a> (unofficial API).
+      Not affiliated with or endorsed by MyAnimeList.
+    </small>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
