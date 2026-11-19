@@ -4,18 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Anime Info</title>
-  <meta name="description" content="Browse anime information from AniList.">
+  <meta name="description" content="Browse anime and manga from AniList, with each anime matched to its manga.">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2.0.6/css/pico.min.css">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <header class="container">
     <nav>
-      <ul><li><a href="#/" class="brand"><strong>Anime Info</strong></a></li></ul>
+      <ul>
+        <li><a href="#/" class="brand"><strong>Anime Info</strong></a></li>
+        <li><a href="#/anime" data-nav="anime">Anime</a></li>
+        <li><a href="#/manga" data-nav="manga">Manga</a></li>
+      </ul>
       <ul class="search-wrap">
         <li>
           <form id="search-form" role="search">
-            <input id="search-input" type="search" name="q" placeholder="Search anime…" aria-label="Search anime" required>
+            <select id="search-type" aria-label="Search in">
+              <option value="anime">Anime</option>
+              <option value="manga">Manga</option>
+            </select>
+            <input id="search-input" type="search" name="q" placeholder="Search…" aria-label="Search" required>
             <input type="submit" value="Search">
           </form>
         </li>
@@ -28,10 +36,10 @@
   <footer class="container">
     <small>
       Data from <a href="https://anilist.co" target="_blank" rel="noopener">AniList</a>.
-      Not affiliated with or endorsed by AniList.
+      Not affiliated with or endorsed by AniList or MangaDex.
     </small>
   </footer>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=3"></script>
 </body>
 </html>
